@@ -1,0 +1,147 @@
+# =============================================================================
+# TP53 sgRNA prioritization — configuration
+# =============================================================================
+# This file fixes every parameter that affects downstream results.
+# Do not modify it after the run is started without bumping `run.version`
+# and recording the change in the run log.
+# =============================================================================
+
+run:
+  version: "1.1.0"
+  description: "Cancer-type-stratified sgRNA prioritization for TP53 hotspots."
+
+# Therapeutic framing. Locked to HDR (homology-directed repair-mediated
+# correction of the hotspot codon back to wild-type). The +/- 10 nt edit
+# window is appropriate for HDR, where the cut must be close to the codon
+# but exact base-level constraints are handled by the donor template.
+# Other framings ("knockout", "base_editing") would require different
+# constraints and are NOT supported by this version of the pipeline.
+framing:
+  mode: "hdr"
+  description: >-
+    HDR-mediated correction of a TP53 hotspot codon back to wild-type using
+    a donor template (donor template design is OUT OF SCOPE for this
+    pipeline; only the sgRNA selection step is provided).
+  edit_window_nt: 10           # cut site within +/- this many nt of codon
+
+# Cas enzyme + PAM. SpCas9 / NGG is the standard; alternatives are listed in
+# `pam_rescue` below for the PAM-desert fallback analysis.
+cas:
+  enzyme: "SpCas9"
+  pam: "NGG"
+  spacer_length: 20
+  cut_offset_from_pam: 3        # Cas9 cuts 3 nt 5' of the PAM
+  pam_rescue:                    # Used only for the PAM-desert supplement.
+    SpCas9-NG: "NGN"
+    SpCas9-VQR: "NGA"
+    Cas12a:    "TTTV"
+
+# Edit window: cut site must be within +/- this many nt of the FIRST base
+# of the hotspot codon.
+edit_window_nt: 10
+
+# Hotspot residues to evaluate. Residue numbering follows UniProt P04637-1
+# (1-indexed). Each entry is the residue number followed by a label.
+hotspots:
+  - { residue: 175, ref_aa: "R", label: "R175H" }
+  - { residue: 220, ref_aa: "Y", label: "Y220C" }
+  - { residue: 245, ref_aa: "G", label: "G245S" }
+  - { residue: 248, ref_aa: "R", label: "R248Q/R248W" }
+  - { residue: 249, ref_aa: "R", label: "R249S" }
+  - { residue: 273, ref_aa: "R", label: "R273H" }
+  - { residue: 282, ref_aa: "R", label: "R282W" }
+
+# Variant strings (ProteinChange-style, e.g. R175H) to count when computing
+# per-cohort frequencies. Anything outside this list is ignored.
+hotspot_variants:
+  - "R175H"
+  - "Y220C"
+  - "G245S"
+  - "R248Q"
+  - "R248W"
+  - "R249S"
+  - "R273H"
+  - "R282W"
+
+# TCGA Pan-Cancer Atlas cohorts to query on cBioPortal.
+cohorts:
+  - id: "ov_tcga_pan_can_atlas_2018"
+    label: "OV (HGSOC)"
+  - id: "paad_tcga_pan_can_atlas_2018"
+    label: "PAAD (PDAC)"
+  - id: "coadread_tcga_pan_can_atlas_2018"
+    label: "COADREAD (CRC)"
+
+# Reference TP53 transcript.
+reference:
+  refseq_accession: "NM_000546.6"
+  expected_cds_length: 1182          # 393 aa + stop = 394 codons * 3
+  ncbi_efetch_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+# TP53 genomic locus on GRCh38/hg38 (NCBI Gene ID 7157, minus strand).
+# Used to identify the on-target Cas-OFFinder hit by genomic coordinate
+# rather than by zero-mismatch heuristic (which misclassified hits at
+# the TP53P1 pseudogene on chr1).
+tp53_locus:
+  chromosome: "chr17"
+  start: 7668421                     # 1-based inclusive
+  end:   7687490                     # 1-based inclusive
+  strand: "-"
+  # Exonic spans within the gene body for the +/- 10 nt edit-window safety
+  # check. These are the exon boundaries on chr17 (GRCh38) for NM_000546.6.
+  # Source: RefSeq exon annotation for NM_000546.6 (Ensembl ENST00000269305).
+  # Pipeline asserts that codon (residue) +/- edit_window_nt sits inside
+  # exactly ONE of these exons before scoring proceeds.
+  exons_grch38:
+    - { number:  1, start: 7687377, end: 7687490 }
+    - { number:  2, start: 7676521, end: 7676622 }
+    - { number:  3, start: 7676381, end: 7676403 }
+    - { number:  4, start: 7675994, end: 7676272 }
+    - { number:  5, start: 7674858, end: 7675088 }
+    - { number:  6, start: 7674181, end: 7674290 }
+    - { number:  7, start: 7673700, end: 7673837 }
+    - { number:  8, start: 7673534, end: 7673608 }
+    - { number:  9, start: 7670609, end: 7670715 }
+    - { number: 10, start: 7669612, end: 7669690 }
+    - { number: 11, start: 7668421, end: 7669561 }
+  # CDS-coordinate (0-based) positions where one CDS exon ends and the
+  # next begins, for NM_000546.6. The enumerate step warns if any
+  # candidate's edit window straddles one of these boundaries (Flag #8
+  # safety check). Set to an empty list [] to disable the check.
+  # The values below are derived from the published NM_000546.6 exon
+  # structure (CDS-bearing exons 2-11). VERIFY against your locally
+  # fetched RefSeq record before relying on them in production:
+  #   exon 2 CDS:  102 nt  -> boundary at 102
+  #   exon 3 CDS:   22 nt  -> boundary at 124
+  #   exon 4 CDS:  279 nt  -> boundary at 403
+  #   exon 5 CDS:  184 nt  -> boundary at 587
+  #   exon 6 CDS:  113 nt  -> boundary at 700
+  #   exon 7 CDS:  110 nt  -> boundary at 810
+  #   exon 8 CDS:  137 nt  -> boundary at 947
+  #   exon 9 CDS:   74 nt  -> boundary at 1021
+  #   exon 10 CDS: 107 nt  -> boundary at 1128
+  #   (exon 11 CDS runs to the stop codon at 1182.)
+  # All seven configured hotspots (R175, Y220, G245, R248, R249, R273,
+  # R282) sit comfortably inside their respective CDS exons with the
+  # default +/- 10 nt edit window, so the check is informational here.
+  cds_exon_boundaries_0based: [102, 124, 403, 587, 700, 810, 947, 1021, 1128]
+
+# cBioPortal API.
+cbioportal:
+  base_url: "https://www.cbioportal.org/api"
+  tp53_entrez_id: 7157
+
+# Composite score weights. Must sum to 1.0.
+scoring:
+  weights:
+    on_target:  0.5
+    off_target: 0.3
+    frequency:  0.2
+
+# Off-target search (Cas-OFFinder).
+off_target:
+  tool: "cas-offinder"               # binary in PATH
+  pam_pattern: "NNNNNNNNNNNNNNNNNNNNNGG"
+  max_mismatches: 4
+  genome_dir: "${GRCH38_DIR}"        # set in environment; see scripts/setup_grch38.sh
+  cfd_aggregate_formula: "100/(100+sum)"  # CRISPOR-style specificity

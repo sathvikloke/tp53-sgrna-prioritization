@@ -1,0 +1,16 @@
+name: tp53-sgrna
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pip
+  - requests>=2.31
+  - pyyaml>=6.0
+  - pandas>=2.0
+  - numpy>=1.24
+  - matplotlib>=3.7
+  - pytest>=7.4
+  - cas-offinder         # bioconda; binary becomes available on PATH
+  - pip:
+    - biopython>=1.81
