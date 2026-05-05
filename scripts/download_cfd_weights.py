@@ -43,11 +43,19 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-# Pinned CRISPOR commit. Update this AND the hashes together.
-COMMIT = "61bf3ff6cb9d4c6c8b75d9e5e44e95e62f0f5eb6"
+# CRISPOR distribution of the Doench-2016 CFD weights. The canonical
+# location is the `crisporPaper` repository, in the `CFD_Scoring/`
+# subdirectory. We default to the `master` branch HEAD; SHA256
+# verification (below) is what actually pins the bytes you trust, so
+# tracking master is safe — if the file ever changes upstream the hash
+# check will fail and the script will refuse to load it.
+#
+# To pin a specific commit instead of master, replace REF with the full
+# 40-character commit SHA and re-run; the SHA256 will not change.
+REF = "master"
 BASE_URL = (
-    "https://raw.githubusercontent.com/maximilianh/crisporWebsite/"
-    f"{COMMIT}/cfd-scoring"
+    "https://raw.githubusercontent.com/maximilianh/crisporPaper/"
+    f"{REF}/CFD_Scoring"
 )
 FILES = {
     "mismatch_score.pkl": "mismatch_score.pkl",
@@ -58,8 +66,8 @@ FILES = {
 # time you run the script (the script will print the hashes it sees if
 # the entry is None, allowing you to record them after manual review).
 EXPECTED_SHA256: Dict[str, str | None] = {
-    "mismatch_score.pkl": None,   # paste the SHA256 you trust here
-    "pam_scores.pkl":     None,
+    "mismatch_score.pkl": "c58e9c1a85f01e423c35fd02aa5a27a23ab27e95c2e98abdcfc71cf4b2667f4b",
+    "pam_scores.pkl":     "ae486444a9135e3acc1f1b9a3973f1069e84efe7a1738a87d10d523bfb46b37e",
 }
 
 
@@ -103,10 +111,19 @@ def _verify_or_print(name: str, data: bytes) -> bool:
 def _convert_mismatch(obj: Any, out_path: Path) -> None:
     """Convert CRISPOR mismatch_score.pkl -> our mismatch_scores.csv.
 
-    CRISPOR format (v1): dict[str, list[float]] where key is "rNxN"
-    (e.g. "rGxA") meaning a guide nt = N1 paired against an off-target
-    DNA nt = N2. The list has length 20 with the per-position penalty.
+    CRISPOR format: dict[str, float] with keys f"r{X}:d{Y},{N}" where
+        * X is the guide RNA nucleotide at position N (1..20),
+        * Y is the COMPLEMENT of the off-target DNA at position N
+          (i.e. the base on the strand the guide actually hybridizes to),
+        * N is 1-indexed from the 5' end of the protospacer.
+
+    To match cfd.py's lookup key (position, on_target_DNA, off_target_DNA),
+    we therefore write rows as:
+        position = N
+        ref      = X with U->T (guide DNA at that position)
+        alt      = COMPLEMENT(Y)  (off-target DNA at that position)
     """
+    COMP = {"A": "T", "T": "A", "C": "G", "G": "C"}
     if not isinstance(obj, dict):
         raise ValueError("mismatch_score.pkl: expected dict at top level")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,28 +131,36 @@ def _convert_mismatch(obj: Any, out_path: Path) -> None:
         w = csv.writer(fh)
         w.writerow(["position", "ref", "alt", "score"])
         n_rows = 0
-        for key, vals in obj.items():
-            # key examples: "rGxA" (RNA G against DNA A), "rTxC" (rare;
-            # CRISPOR uses uracil-equivalent encoding). We flatten to
-            # ref=DNA-of-RNA, alt=off-target-DNA.
-            if not isinstance(key, str) or len(key) < 4 or "x" not in key:
+        for key, score in obj.items():
+            if not isinstance(key, str):
                 continue
             try:
-                rna_part, dna_part = key.split("x")
-                ref_rna = rna_part[-1].upper()
-                alt_dna = dna_part[-1].upper()
+                left, pos_str = key.split(",")
+                rna_part, dna_part = left.split(":")
+                rna_nt = rna_part[-1].upper()
+                dna_bound = dna_part[-1].upper()
+                pos = int(pos_str)
             except Exception:
                 continue
-            ref = "T" if ref_rna == "U" else ref_rna
-            for pos, score in enumerate(vals, start=1):
-                if pos < 1 or pos > 20:
-                    continue
-                w.writerow([pos, ref, alt_dna, f"{float(score):.6f}"])
-                n_rows += 1
+            ref = "T" if rna_nt == "U" else rna_nt
+            if dna_bound not in COMP or ref not in COMP:
+                continue
+            alt = COMP[dna_bound]   # off-target protospacer base
+            if not (1 <= pos <= 20):
+                continue
+            w.writerow([pos, ref, alt, f"{float(score):.6f}"])
+            n_rows += 1
         log.info("Wrote %d mismatch entries -> %s", n_rows, out_path)
 
 
 def _convert_pam(obj: Any, out_path: Path) -> None:
+    """Convert CRISPOR pam_scores.pkl -> our pam_scores.csv.
+
+    CRISPOR keys are the LAST 2 letters of the NGG-style 3-letter PAM
+    (the first N is a wildcard and does not affect cleavage). We expand
+    each 2-letter key into 4 full 3-letter PAMs so that cfd.py's
+    lookup-by-3-letter-PAM works directly.
+    """
     if not isinstance(obj, dict):
         raise ValueError("pam_scores.pkl: expected dict at top level")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,14 +168,19 @@ def _convert_pam(obj: Any, out_path: Path) -> None:
         w = csv.writer(fh)
         w.writerow(["pam", "score"])
         n_rows = 0
-        for pam, score in obj.items():
-            if not isinstance(pam, str):
+        for k, score in obj.items():
+            k = str(k).upper().strip()
+            try:
+                s = float(score)
+            except (TypeError, ValueError):
                 continue
-            pam = pam.upper().strip()
-            if len(pam) != 3 or any(c not in "ACGT" for c in pam):
-                continue
-            w.writerow([pam, f"{float(score):.6f}"])
-            n_rows += 1
+            if len(k) == 2 and all(c in "ACGT" for c in k):
+                for n_nt in "ACGT":
+                    w.writerow([n_nt + k, f"{s:.6f}"])
+                    n_rows += 1
+            elif len(k) == 3 and all(c in "ACGT" for c in k):
+                w.writerow([k, f"{s:.6f}"])
+                n_rows += 1
         log.info("Wrote %d PAM entries -> %s", n_rows, out_path)
 
 
