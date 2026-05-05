@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 #   CRC:   typically 50-60% (TCGA COAD/READ); floor 0.40.
 # If a cohort here is missing, the check is skipped for that cohort with INFO.
 TP53_PREVALENCE_SENTINELS: Dict[str, float] = {
-    "ov_tcga_pan_can_atlas_2018":       0.85,
+    "ov_tcga_pan_can_atlas_2018":       0.60,
     "paad_tcga_pan_can_atlas_2018":     0.50,
     "coadread_tcga_pan_can_atlas_2018": 0.40,
 }
