@@ -61,36 +61,38 @@ def _resolve_genome_dir(cfg: Config) -> Path:
 
 
 def _build_input_file(spacers: List[str], pam_pattern: str,
-                      genome_dir: Path, max_mm: int, out: Path) -> None:
+                      genome_dir: Path, max_mm: int, out: Path,
+                      spacer_length: int = 20) -> None:
     """Write the Cas-OFFinder input file.
 
     Format (one line each):
         line 1: directory containing chromosome FASTA files
         line 2: search pattern (e.g. NNNNNNNNNNNNNNNNNNNNNGG)
         line 3+: <spacer><PAM-placeholder> <max_mismatches>
-    The PAM placeholder is N's of length equal to the PAM portion of the
-    pattern (the suffix after the trailing run of N's).
+    Cas-OFFinder requires every query line to be the SAME length as the
+    pattern. The PAM placeholder is therefore N's of length equal to the
+    full PAM portion of the pattern, including any leading N (e.g. for
+    NGG the PAM is 3 nt and the placeholder is "NNN", not "NN"). The PAM
+    length is derived from `len(pam_pattern) - spacer_length` rather
+    than by counting leading N's, because the leading N of an NGG PAM
+    is itself part of the PAM, not the protospacer.
     """
     ensure_dir(out.parent)
     pam_pattern = pam_pattern.upper()
-    # Strip the leading run of N's representing the protospacer to recover
-    # the PAM portion (e.g. NNN...NNNNGG -> "NGG"; we then need 3 placeholder
-    # N's in the query).
-    n_proto = 0
-    for ch in pam_pattern:
-        if ch == "N":
-            n_proto += 1
-        else:
-            break
-    pam_len = len(pam_pattern) - n_proto
+    pam_len = len(pam_pattern) - spacer_length
     if pam_len <= 0:
-        raise ValueError(f"PAM portion is empty in pattern {pam_pattern!r}")
+        raise ValueError(
+            f"Non-positive PAM length: pattern={pam_pattern!r} "
+            f"spacer_length={spacer_length}"
+        )
     placeholder = "N" * pam_len
     lines = [str(genome_dir), pam_pattern]
     for s in spacers:
         s = s.upper()
-        if len(s) != 20:
-            raise ValueError(f"spacer must be 20 nt; got {len(s)}: {s!r}")
+        if len(s) != spacer_length:
+            raise ValueError(
+                f"spacer must be {spacer_length} nt; got {len(s)}: {s!r}"
+            )
         lines.append(f"{s}{placeholder} {max_mm}")
     out.write_text("\n".join(lines) + "\n")
 
@@ -233,7 +235,8 @@ def run(cfg: Config | None = None, *, device: str = "C") -> Path:
 
     spacers = [r["spacer_5p_to_3p"] for r in rows]
     unique_spacers = sorted(set(spacers))
-    _build_input_file(unique_spacers, pam_pattern, genome_dir, max_mm, in_file)
+    _build_input_file(unique_spacers, pam_pattern, genome_dir, max_mm, in_file,
+                      spacer_length=cfg.spacer_length)
     _run_cas_offinder(in_file, out_file, device=device)
     hits = _parse_cas_offinder_output(out_file)
 
