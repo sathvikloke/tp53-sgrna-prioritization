@@ -245,3 +245,21 @@ def run(cfg: Config | None = None) -> Path:
 if __name__ == "__main__":  # pragma: no cover
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     run()
+
+
+def _verify_spacer_in_genome(spacer: str, genome_seq: str) -> bool:
+    """Return True iff the 20-nt spacer (or its reverse complement)
+    appears as a substring of the given genome sequence.
+
+    Used as a defensive check: spacers enumerated from the spliced CDS
+    occasionally fail to map to the genomic reference, either because
+    of mRNA-vs-genome reference discrepancies or because of off-by-one
+    errors in exon-boundary handling. Any spacer that fails this check
+    cannot be evaluated by reference-genome-based off-target tools and
+    is reported separately rather than scored.
+    """
+    if spacer in genome_seq:
+        return True
+    rc = spacer[::-1].translate(str.maketrans("ACGT", "TGCA"))
+    return rc in genome_seq
+

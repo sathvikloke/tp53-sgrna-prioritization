@@ -48,7 +48,7 @@ def _grid() -> List[Dict[str, float]]:
     All non-negative, summing to 1, with each weight in {0.2, 0.3, ..., 0.8}.
     """
     out: List[Dict[str, float]] = []
-    steps = [0.1 * i for i in range(2, 9)]      # 0.2 ... 0.8
+    steps = [0.05 * i for i in range(2, 17)]     # 0.10 ... 0.80 step 0.05
     for on, off in product(steps, steps):
         freq = round(1.0 - on - off, 6)
         if freq < 0.0 or freq > 0.8 + 1e-9:
